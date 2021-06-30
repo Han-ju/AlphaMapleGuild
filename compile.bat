@@ -1,0 +1,1 @@
+pyinstaller --onefile --distpath . --icon=icon.ico --add-data="icon.ico;." AlphaMapleGuild.py
