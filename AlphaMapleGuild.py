@@ -40,21 +40,36 @@ while True:
                            for num in nums[:6]])
                 for x in range(8, cut.shape[0], 24)]
 
-    suro = [np.argmax([np.prod(np.equal(cut[x:x + 10, 327:334], num))
-                       for num in nums[:10]]) * 1000 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 336:343], num))
-                       for num in nums[:10]]) * 100 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 342:349], num))
-                       for num in nums[:10]]) * 10 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 348:355], num))
-                       for num in nums[:10]]) +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 331:338], num))
-                       for num in nums[:10]]) * 100 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 337:344], num))
-                       for num in nums[:10]]) * 10 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 343:350], num))
-                       for num in nums[:10]])
-            for x in range(8, cut.shape[0], 24)]
+    suro = []
+    for x in range(8, cut.shape[0], 24):
+        if np.prod(np.equal(cut[x:x + 10, 336:340], nums[-1])):
+            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 324:331], num))
+                                   for num in nums[:10]]) * 10000 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 330:337], num))
+                                   for num in nums[:10]]) * 1000 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 339:346], num))
+                                   for num in nums[:10]]) * 100 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 345:352], num))
+                                   for num in nums[:10]]) * 10 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 351:358], num))
+                                   for num in nums[:10]]))
+
+        elif np.prod(np.equal(cut[x:x + 10, 333:337], nums[-1])):
+            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 327:334], num))
+                                   for num in nums[:10]]) * 1000 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 336:343], num))
+                                   for num in nums[:10]]) * 100 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 342:349], num))
+                                   for num in nums[:10]]) * 10 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 348:355], num))
+                                   for num in nums[:10]]))
+        else:
+            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 331:338], num))
+                                   for num in nums[:10]]) * 100 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 337:344], num))
+                                   for num in nums[:10]]) * 10 +
+                        np.argmax([np.prod(np.equal(cut[x:x + 10, 343:350], num))
+                                   for num in nums[:10]]))
 
     flag = [np.prod(np.equal(cut[x:x + 10, 407:433] * 255, thousand)) * 1000 +
             np.argmax([np.prod(np.equal(cut[x:x + 10, 409:416], num))
