@@ -3,152 +3,182 @@ import cv2
 import numpy as np
 import openpyxl
 import time
-from PIL import Image as im
 from PIL import ImageGrab
 import os
+import hashlib
 
-
-template = cv2.imread(r"data\guild.png", cv2.IMREAD_GRAYSCALE)
-mask = cv2.imread(r"data\mask.png", cv2.IMREAD_GRAYSCALE)
-numpic = cv2.imread(r"data\maple_numbers.png", cv2.IMREAD_GRAYSCALE) * 255
-thousand = cv2.imread(r"data\maple_1000.png", cv2.IMREAD_GRAYSCALE)
-
-nums = [numpic[:, 7 * i:7 * i + 7] for i in range(11)]
+GUILD_TEMPLATE = cv2.imread(r"data\guild.png", cv2.IMREAD_GRAYSCALE)
+GUILD_MASK = cv2.imread(r"data\mask.png", cv2.IMREAD_GRAYSCALE)
+GUILD_TITLE = cv2.imread(r"data\guild_member_participation.png", cv2.IMREAD_GRAYSCALE)
+NUMBER_PICTURES = cv2.imread(r"data\maple_numbers.png", cv2.IMREAD_GRAYSCALE) * 255
+NUMBERS = cv2.imread(r"data\numbers.png", cv2.IMREAD_GRAYSCALE).reshape(8, 10, 5).swapaxes(0, 1) * 255
+COMMA = cv2.imread(r"data\comma.png", cv2.IMREAD_GRAYSCALE) * 255
+THOUSAND_PICTURE = cv2.imread(r"data\number_1000.png", cv2.IMREAD_GRAYSCALE) * 255
+GUILD_H, GUILD_W = GUILD_TEMPLATE.shape
 
 saved_previous = None
 
-mDict = {}
+written_nicknames = {}
 
+TITLE_THRESHOLD = 10000
 patience = 10
 total = 0
+
+print("전체 화면을 캡처해 길드 창의 위치를 찾습니다. 모니터의 해상도가 높을수록 오래 걸릴 수 있습니다.")
+
+
+capture = np.array(ImageGrab.grab(all_screens=True))
+capture = cv2.cvtColor(capture, cv2.COLOR_BGR2GRAY)
+match_result = cv2.minMaxLoc(cv2.matchTemplate(capture, GUILD_TEMPLATE, cv2.TM_SQDIFF_NORMED, mask=GUILD_MASK))
+best_error, worst_error, best_location, worst_location = match_result
+
+print(f"이미지 오차 점수: {best_error:.3f}, 좌상단 픽셀 좌표 (x, y): {best_location}")
+print("(정상적인 경우 오차는 대체로 0.01 이하입니다)")
+
+guild_x, guild_y = best_location
+capture = capture[guild_y:, guild_x:]
+
+while np.sum(GUILD_TITLE - capture[64:83, 175:286]) > TITLE_THRESHOLD:
+    inputs = input("현재 탭이 [길드원 참여 현황]이 아닙니다. 이 창에서 엔터 키를 입력해 재확인합니다. SKIP을 입력해 무시할 수 있습니다.")
+    if inputs == 'SKIP':
+        break
+    capture = np.array(ImageGrab.grab(bbox=(guild_x, guild_y, guild_x + GUILD_W, guild_y + GUILD_H), all_screens=True))
+    capture = cv2.cvtColor(capture, cv2.COLOR_BGR2GRAY)
+print("현재 길드 창의 탭이 [길드원 참여 현황]임을 확인하였습니다.")
+
+start_time = time.time()
 while True:
-    start_time = time.time()
-    color = np.array(ImageGrab.grab(all_screens=True))
-    print(r"화면 캡쳐 완료! 처리중...", end='')
-    twobit = np.prod(color == 255, axis=-1) + np.prod(color == 179, axis=-1) + np.prod(color == 187, axis=-1)
+    x = guild_x + 205
+    y = guild_y + 131
+    w = guild_x + 640
+    h = guild_y + 539
+    capture = np.array(ImageGrab.grab(bbox=(x, y, w, h), all_screens=True))
+    capture = np.prod(capture == 255, axis=-1) + np.prod(capture == 179, axis=-1) + np.prod(capture == 187, axis=-1)
+    capture = capture.astype('u1')
+    # grayscale color == (255 or 179 or 187)
+    cv2.imwrite(f'tmp.png', 255 - capture * 255)
 
-    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+    # capture.shape = (H, W)
 
-    result = cv2.matchTemplate(gray, template, cv2.TM_SQDIFF_NORMED, mask=mask)
-    minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(result)
-    x, y = minLoc
-    h, w = template.shape
+    mission_score = np.zeros(17, dtype=int)
+    idx, val = np.where(np.all(capture[:, 274:279].reshape(17, 24, -1)[np.newaxis, :, 9:17] == NUMBERS[:6, np.newaxis, ...], axis=(2, 3)).T)
+    mission_score[idx] = val
 
-    cut = np.array(twobit)[y: y + h, x: x + w][131:539, 205:640]
+    flag_score = np.all(capture[:, 408:432].reshape(17, 24, -1)[:, 9:18] == THOUSAND_PICTURE[np.newaxis, :, :], axis=(1, 2)) * 1000
+    idx, val = np.where(np.all(capture[:, 410:415].reshape(17, 24, -1)[np.newaxis, :, 9:17] == NUMBERS[:, np.newaxis, ...], axis=(2, 3)).T)
+    flag_score[idx] += val * 100
+    idx, val = np.where(np.all(capture[:, 416:421].reshape(17, 24, -1)[np.newaxis, :, 9:17] == NUMBERS[:, np.newaxis, ...], axis=(2, 3)).T)
+    flag_score[idx] += val * 10
 
-    missions = [np.argmax([np.prod(np.equal(cut[x:x + 10, 273:280], num))
-                           for num in nums[:6]])
-                for x in range(8, cut.shape[0], 24)]
+    def detect_number(start):
+        return np.where(np.all(capture[:, start:start+5].reshape(17, 24, -1)[np.newaxis, :, 9:17] == NUMBERS[:, np.newaxis, ...], axis=(2, 3)).T)
 
-    suro = []
-    for x in range(8, cut.shape[0], 24):
-        if np.prod(np.equal(cut[x:x + 10, 336:340], nums[-1])):
-            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 324:331], num))
-                                   for num in nums[:10]]) * 10000 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 330:337], num))
-                                   for num in nums[:10]]) * 1000 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 339:346], num))
-                                   for num in nums[:10]]) * 100 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 345:352], num))
-                                   for num in nums[:10]]) * 10 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 351:358], num))
-                                   for num in nums[:10]]))
+    suro_score = np.zeros(17, dtype=int)
 
-        elif np.prod(np.equal(cut[x:x + 10, 333:337], nums[-1])):
-            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 327:334], num))
-                                   for num in nums[:10]]) * 1000 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 336:343], num))
-                                   for num in nums[:10]]) * 100 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 342:349], num))
-                                   for num in nums[:10]]) * 10 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 348:355], num))
-                                   for num in nums[:10]]))
-        else:
-            suro.append(np.argmax([np.prod(np.equal(cut[x:x + 10, 331:338], num))
-                                   for num in nums[:10]]) * 100 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 337:344], num))
-                                   for num in nums[:10]]) * 10 +
-                        np.argmax([np.prod(np.equal(cut[x:x + 10, 343:350], num))
-                                   for num in nums[:10]]))
+    idx, val = detect_number(325)
+    suro_score[idx] += val * 10000
+    idx, val = detect_number(331)
+    suro_score[idx] += val * 1000
+    idx, val = detect_number(340)
+    suro_score[idx] += val * 100
+    idx, val = detect_number(346)
+    suro_score[idx] += val * 10
+    idx, val = detect_number(352)
+    suro_score[idx] += val * 1
 
-    flag = [np.prod(np.equal(cut[x:x + 10, 407:433] * 255, thousand)) * 1000 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 409:416], num))
-                       for num in nums[:10]]) * 100 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 415:422], num))
-                       for num in nums[:10]]) * 10 +
-            np.argmax([np.prod(np.equal(cut[x:x + 10, 421:428], num))
-                       for num in nums[:10]])
-            for x in range(8, cut.shape[0], 24)]
+    idx, val = detect_number(328)
+    suro_score[idx] += val * 1000
+    idx, val = detect_number(337)
+    suro_score[idx] += val * 100
+    idx, val = detect_number(343)
+    suro_score[idx] += val * 10
+    idx, val = detect_number(349)
+    suro_score[idx] += val * 1
 
-    nick_img = []
-    nick_hash = []
-    for x in range(7, cut.shape[0] + 25, 24):
-        for y in range(8, 73):
-            if np.sum(cut[x + 1:x + 11, y:y + 4]) == 0:
-                break
-        nick = cut[x:x + 12, 7:y + 1]
-        nick_img.append(nick)
-        nick_hash.append(hex(y - 6) + ''.join([hex(i % 16)[2:] for i in np.sum(nick[1:-1], axis=1)]))
+    idx, val = detect_number(332)
+    suro_score[idx] += val * 100
+    idx, val = detect_number(338)
+    suro_score[idx] += val * 10
+    idx, val = detect_number(333)
+    suro_score[idx] += val * 1
 
-    if not os.path.exists('nicknames'):
-        os.makedirs('nicknames')
+    nickname_imgs = capture[:, 7:76].reshape(17, 24, -1)[:, 8:19]
+
+    if not os.path.exists('nick_hash'):
+        os.makedirs('nick_hash')
+    blank_hash = "2269c8cf4be7a9ed867972bcd37b73c1ed5a6e97212c3717a804b16c9795b8df"
 
     cnt = 0
-    for nick, a, b, c, d in zip(nick_hash, nick_img, missions, suro, flag):
-        if nick != '0x20000000000' and nick not in mDict:
-            im.fromarray(255 - a * 255).convert('RGB').save(f'nicknames/{nick}.jpg')
-            mDict[nick] = (b, c, d)
+    for img, mission, suro, flag in zip(nickname_imgs, mission_score, suro_score, flag_score):
+        nick_hash = hashlib.sha256(str(img.tobytes()).encode()).hexdigest()
+        if nick_hash != blank_hash and nick_hash not in written_nicknames:
+            cv2.imwrite(f'nick_hash/{nick_hash}.png', 255 - img * 255)
+            written_nicknames[nick_hash] = (mission, suro, flag)
             cnt += 1
+
     if cnt:
         total += cnt
-        patience = 5
         print(f"\r{cnt}명 추가, 누적 {total}명 기록")
+        start_time = time.time()
+    elif (time.time() - start_time) > 5 or total > 188:
+        print('\r시간이 초과되었거나, 모든 페이지를 스캔하여 스캔을 종료합니다')
+        break
     else:
-        patience -= 1
-        if patience <= 0:
-            print('\r캡처를 종료합니다')
-            break
-        else:
-            print(f"\r스크롤을 넘겨주세요. {patience}초 더 대기하면 프로그램이 종료됩니다.")
-    time.sleep(max(1 - time.time() + start_time, 0))
-
-hash2nick = {}
+        print(f"\r스크롤을 넘겨주세요. 새로운 페이지가 5초간 스캔되지 않으면 스캔을 종료합니다.", end='')
 
 try:
     wb = openpyxl.load_workbook('result.xlsx')
     w0 = wb.worksheets[0]
-    w0.column_dimensions['B'].hidden = True
-
+    hash2nick = {r[0]: r[1]
+                 for r in w0.iter_rows(min_row=2, max_row=w0.max_row, min_col=2, max_col=3, values_only=True)}
 except FileNotFoundError:
     wb = openpyxl.Workbook()
     w0 = wb.worksheets[0]
     w0.title = "닉네임 정보"
+    w0.column_dimensions['B'].hidden = True
     w0.cell(row=1, column=1).value = '닉네임 이미지'
     w0.cell(row=1, column=2).value = '닉네임 해쉬'
     w0.cell(row=1, column=3).value = '닉네임(수동입력)'
+    hash2nick = {}
 
 ws = wb.create_sheet(title=datetime.now().strftime("%y%m%d %H%M"))
 ws.cell(row=1, column=1).value = '닉네임 해쉬'
-ws.cell(row=1, column=2).value = '닉네임(수동입력)'
+ws.cell(row=1, column=2).value = '닉네임(자동으로 채워짐)'
 ws.cell(row=1, column=3).value = '주간미션'
 ws.cell(row=1, column=4).value = '지하 수로'
 ws.cell(row=1, column=5).value = '플래그 레이스'
 
-for i, (h, (m, s, f)) in enumerate(mDict.items()):
+num_new_nickname = 0
+for i, (h, (m, s, f)) in enumerate(written_nicknames.items()):
     ws.cell(row=i + 2, column=1).value = h
-    if h in hash2nick:
-        ws.cell(row=i + 2, column=3).value = hash2nick[h]
+    if h in hash2nick and hash2nick[h] != '':
+        ws.cell(row=i + 2, column=2).value = hash2nick[h]
+        del hash2nick[h]
     else:
+        ws.cell(row=i + 2, column=2).value = f"=IF(VLOOKUP(A{i + 2},'닉네임 정보'!B:C,2,FALSE)" + r',,"")'
+        num_new_nickname += 1
         max_r = w0.max_row
-        img = openpyxl.drawing.image.Image(f'nicknames/{h}.jpg')
+        img = openpyxl.drawing.image.Image(f'nick_hash/{h}.png')
         img.anchor = f'A{max_r + 1}'
         w0.add_image(img)
         w0.cell(row=max_r + 1, column=2).value = h
 
-    ws.cell(row=i + 2, column=2).value = f"=IF(VLOOKUP(A{i + 2},'닉네임 정보'!B:C,2,FALSE)" + r',,"")'
     ws.cell(row=i + 2, column=3).value = m
     ws.cell(row=i + 2, column=4).value = s
     ws.cell(row=i + 2, column=5).value = f
+
+flag = False
+if len(hash2nick) > 0:
+    print(f"기존에 존재한 닉네임 중 총 {len(hash2nick)}개가 스캔되지 않았습니다.")
+    print(f"스캔 도중 마우스가 닉네임을 가렸거나, 기존 유저가 닉네임을 변경했거나, 길드를 탈퇴하였을 수 있습니다.")
+    print("누락된 닉네임 중, 수기로 기록되어 있던 닉네임은 다음과 같습니다.")
+    print([v for v in list(hash2nick.values()) if v])
+    flag = True
+if num_new_nickname > 0:
+    print(f"새로 추가된 닉네임은 총 {num_new_nickname}개 입니다.")
+    flag = True
+if flag:
+    input("닉네임이 누락되")
 
 while True:
     try:
